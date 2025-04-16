@@ -1,53 +1,54 @@
-import Link from "next/link";
+import { ArrowRight, FileText, ListChecks, Settings, Shield } from "lucide-react";
+import { FeatureCard } from "@/components/feature-card";
 
-import { LatestPost } from "~/app/_components/post";
-import { api, HydrateClient } from "~/trpc/server";
-
-export default async function Home() {
-  const hello = await api.post.hello({ text: "from tRPC" });
-
-  void api.post.getLatest.prefetch();
-
+export default function Home() {
   return (
-    <HydrateClient>
-      <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
-        <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
-          <h1 className="text-5xl font-extrabold tracking-tight sm:text-[5rem]">
-            Create <span className="text-[hsl(280,100%,70%)]">T3</span> App
-          </h1>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-8">
-            <Link
-              className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-              href="https://create.t3.gg/en/usage/first-steps"
-              target="_blank"
-            >
-              <h3 className="text-2xl font-bold">First Steps →</h3>
-              <div className="text-lg">
-                Just the basics - Everything you need to know to set up your
-                database and authentication.
-              </div>
-            </Link>
-            <Link
-              className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-              href="https://create.t3.gg/en/introduction"
-              target="_blank"
-            >
-              <h3 className="text-2xl font-bold">Documentation →</h3>
-              <div className="text-lg">
-                Learn more about Create T3 App, the libraries it uses, and how
-                to deploy it.
-              </div>
-            </Link>
-          </div>
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-2xl text-white">
-              {hello ? hello.greeting : "Loading tRPC query..."}
-            </p>
-          </div>
+    <div className="container mx-auto px-4 py-8">
+      <div className="text-center mb-12">
+        <h1 className="text-4xl font-bold mb-4">Welcome to Soraban</h1>
+        <p className="text-xl text-muted-foreground">
+          Your intelligent bookkeeping system for efficient financial management
+        </p>
+      </div>
 
-          <LatestPost />
-        </div>
-      </main>
-    </HydrateClient>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <FeatureCard
+          title="Transactions"
+          description="Record and import transactions with ease. Support for CSV imports and manual entry."
+          href="/transactions"
+          icon={<FileText className="w-8 h-8" />}
+        />
+        <FeatureCard
+          title="Categories"
+          description="Organize your transactions with smart categorization and bulk actions."
+          href="/categories"
+          icon={<ListChecks className="w-8 h-8" />}
+        />
+        <FeatureCard
+          title="Rules"
+          description="Set up automatic categorization rules to save time on transaction management."
+          href="/rules"
+          icon={<Settings className="w-8 h-8" />}
+        />
+        <FeatureCard
+          title="Reviews"
+          description="Review flagged transactions and anomalies for better financial oversight."
+          href="/reviews"
+          icon={<Shield className="w-8 h-8" />}
+        />
+      </div>
+
+      <div className="mt-12 text-center">
+        <p className="text-muted-foreground mb-4">
+          Ready to streamline your bookkeeping process?
+        </p>
+        <a
+          href="/transactions"
+          className="inline-flex items-center gap-2 text-primary hover:underline"
+        >
+          Get Started <ArrowRight className="w-4 h-4" />
+        </a>
+      </div>
+    </div>
   );
 }
