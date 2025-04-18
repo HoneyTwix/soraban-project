@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import { api } from "~/trpc/react";
 import { Button } from "~/components/ui/button";
@@ -6,11 +8,21 @@ import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-export function TransactionForm({ userId }: { userId: string }) {
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+interface TransactionFormProps {
+  userId: string;
+  initialData?: {
+    description?: string;
+    amount: string;
+    date?: string;
+    categoryId?: string;
+  };
+}
+
+export function TransactionForm({ userId, initialData }: TransactionFormProps) {
+  const [description, setDescription] = useState(initialData?.description ?? "");
+  const [amount, setAmount] = useState(initialData?.amount ?? "");
+  const [date, setDate] = useState(initialData?.date ?? "");
+  const [categoryId, setCategoryId] = useState(initialData?.categoryId ?? "");
 
   const { data: categories } = api.category.getAll.useQuery({ userId });
   const createTransaction = api.transaction.create.useMutation({
@@ -38,7 +50,7 @@ export function TransactionForm({ userId }: { userId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Add New Transaction</CardTitle>
+        <CardTitle>{initialData ? "Edit Transaction" : "Add New Transaction"}</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -97,7 +109,7 @@ export function TransactionForm({ userId }: { userId: string }) {
             disabled={createTransaction.isPending}
             className="w-full"
           >
-            {createTransaction.isPending ? "Adding..." : "Add Transaction"}
+            {createTransaction.isPending ? "Saving..." : initialData ? "Save Changes" : "Add Transaction"}
           </Button>
         </form>
       </CardContent>

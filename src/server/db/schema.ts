@@ -1,135 +1,121 @@
 import { sql } from "drizzle-orm";
-import { index, pgTableCreator, text, timestamp, uuid, decimal, boolean, jsonb } from "drizzle-orm/pg-core";
+import {
+  index,
+  pgTableCreator,
+  text,
+  timestamp,
+  uuid,
+  decimal,
+  boolean,
+  jsonb,
+  pgEnum,
+} from "drizzle-orm/pg-core";
 
 export const createTable = pgTableCreator((name) => `soraban-project_${name}`);
 
-// Users table
+// Users table (existing)
 export const users = createTable(
   "user",
   (d) => ({
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: text("id").primaryKey(),
     email: text("email").notNull().unique(),
     name: text("name"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .$onUpdate(() => new Date()),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(() => new Date()),
   }),
-  (t) => [index("email_idx").on(t.email)],
+  (t) => [index("user_email_idx").on(t.email)],
 );
 
-// Categories table
+// Create an enum for rule types
+export const flagsEnum = pgEnum('flag_type', ['incomplete', 'duplicate', 'unusual_amount',"uncategorized",]);
+export const ruleConditionEnum = pgEnum('rule_condition_type', ['description', 'date', 'amount',]);
+export const ruleConditionSubtypeEnum = pgEnum('rule_condition_subtype', ['contains', 'greater_than', 'less_than', 'equals',"not_equals", "ai","before","after","between","not_between","greater_than_or_equal","less_than_or_equal"]);
+
+// Rules table
+export const categorizationRules = createTable(
+  "categorization_rule",
+  (d) => ({
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id").references(() => users.id).notNull(),
+    name: text("name").notNull(),
+    conditionType: ruleConditionEnum("condition_type").notNull(),
+    conditionValue: text("condition_value").notNull(), // The value to compare against (e.g., "Amazon" or "1000")
+    optionalConditionValue: text("optional_condition_value"), // The value to compare against (e.g., "Amazon" or "1000")
+    aiPrompt: text("ai_prompt"), // The prompt to use for the AI
+    categoryId: uuid("category_id").references(() => categories.id), // The category to assign to the transaction
+    conditionSubtype: ruleConditionSubtypeEnum("condition_subtype").notNull(), // The field to check (e.g., "description" or "amount")
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(() => new Date()),
+  }),
+  (t) => [
+    index("rule_user_id_idx").on(t.userId),
+  ],
+);
+
+// Categories table (modified)
 export const categories = createTable(
   "category",
   (d) => ({
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     description: text("description"),
-    userId: uuid("user_id").references(() => users.id).notNull(),
+    userId: text("user_id").references(() => users.id).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .$onUpdate(() => new Date()),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(() => new Date()),
   }),
   (t) => [
-    index("user_id_idx").on(t.userId),
-    index("name_idx").on(t.name),
+    index("category_user_id_idx").on(t.userId),
+    index("category_name_idx").on(t.name),
   ],
 );
 
-// Transactions table
+// Transactions table (modified)
 export const transactions = createTable(
   "transaction",
   (d) => ({
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").references(() => users.id).notNull(),
+    userId: text("user_id").references(() => users.id).notNull(),
     amount: decimal("amount", { precision: 19, scale: 4 }).notNull(),
     description: text("description"),
     date: timestamp("date", { withTimezone: true }).notNull(),
-    categoryId: uuid("category_id").references(() => categories.id),
     isFlagged: boolean("is_flagged").default(false).notNull(),
-    flagReason: text("flag_reason"),
-    metadata: jsonb("metadata"),
-    source: text("source").notNull(), // 'manual' or 'csv'
+    flags: flagsEnum("flags").array().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .$onUpdate(() => new Date()),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(() => new Date()),
   }),
   (t) => [
-    index("user_id_idx").on(t.userId),
-    index("date_idx").on(t.date),
-    index("category_id_idx").on(t.categoryId),
-    index("is_flagged_idx").on(t.isFlagged),
+    index("transaction_user_id_idx").on(t.userId),
+    index("transaction_date_idx").on(t.date),
+    index("transaction_is_flagged_idx").on(t.isFlagged),
   ],
 );
 
-// Categorization rules table
-export const categorizationRules = createTable(
-  "categorization_rule",
+// Transaction-Category many-to-many relationship table
+export const transactionCategories = createTable(
+  "transaction_category",
   (d) => ({
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").references(() => users.id).notNull(),
-    categoryId: uuid("category_id").references(() => categories.id).notNull(),
-    condition: jsonb("condition").notNull(), // Store rule conditions as JSON
-    priority: d.integer("priority").notNull().default(0),
-    isActive: boolean("is_active").default(true).notNull(),
+    transactionId: uuid("transaction_id")
+      .references(() => transactions.id)
+      .notNull(),
+    categoryId: uuid("category_id")
+      .references(() => categories.id)
+      .notNull(),
+    addedBy: text("added_by").notNull(), // 'user' or 'rule'
+    ruleId: uuid("rule_id").references(() => categorizationRules.id), // Which rule added this category (if by rule)
     createdAt: timestamp("created_at", { withTimezone: true })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .$onUpdate(() => new Date()),
   }),
   (t) => [
-    index("user_id_idx").on(t.userId),
-    index("category_id_idx").on(t.categoryId),
-  ],
-);
-
-// Anomaly detection rules table
-export const anomalyRules = createTable(
-  "anomaly_rule",
-  (d) => ({
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").references(() => users.id).notNull(),
-    name: text("name").notNull(),
-    description: text("description"),
-    condition: jsonb("condition").notNull(), // Store anomaly detection conditions
-    severity: text("severity").notNull(), // 'low', 'medium', 'high'
-    isActive: boolean("is_active").default(true).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .$onUpdate(() => new Date()),
-  }),
-  (t) => [
-    index("user_id_idx").on(t.userId),
-  ],
-);
-
-// Transaction reviews table
-export const transactionReviews = createTable(
-  "transaction_review",
-  (d) => ({
-    id: uuid("id").primaryKey().defaultRandom(),
-    transactionId: uuid("transaction_id").references(() => transactions.id).notNull(),
-    userId: uuid("user_id").references(() => users.id).notNull(),
-    status: text("status").notNull(), // 'pending', 'approved', 'rejected'
-    notes: text("notes"),
-    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .$onUpdate(() => new Date()),
-  }),
-  (t) => [
-    index("transaction_id_idx").on(t.transactionId),
-    index("user_id_idx").on(t.userId),
-    index("status_idx").on(t.status),
+    index("transaction_category_transaction_idx").on(t.transactionId),
+    index("transaction_category_category_idx").on(t.categoryId),
   ],
 );

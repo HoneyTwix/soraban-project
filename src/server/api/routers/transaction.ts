@@ -1,8 +1,16 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
-import { transactions } from "~/server/db/schema";
+import { transactions, transactionCategories, categories } from "~/server/db/schema";
 import { eq, and, or, gte, lte, isNull } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+
+type TransactionWithCategories = InferSelectModel<typeof transactions> & {
+  categories: Array<{
+    categoryId: string;
+    category: InferSelectModel<typeof categories>;
+  }>;
+};
 
 export const transactionRouter = createTRPCRouter({
   // Get all transactions with optional filters
@@ -25,21 +33,31 @@ export const transactionRouter = createTRPCRouter({
       if (input.endDate) {
         conditions.push(lte(transactions.date, input.endDate));
       }
-      if (input.categoryId) {
-        conditions.push(eq(transactions.categoryId, input.categoryId));
-      }
       if (input.isFlagged !== undefined) {
         conditions.push(eq(transactions.isFlagged, input.isFlagged));
       }
 
-      return db.query.transactions.findMany({
+      const query = db.query.transactions.findMany({
         where: and(...conditions),
         with: {
-          category: true,
-          reviews: true,
+          categories: {
+            with: {
+              category: true,
+            },
+          },
         },
         orderBy: (transactions) => transactions.date,
-      });
+      }) as Promise<TransactionWithCategories[]>;
+
+      // If category filter is provided, filter results in memory
+      const results = await query;
+      if (input.categoryId) {
+        return results.filter((transaction: TransactionWithCategories) => 
+          transaction.categories.some((tc: { categoryId: string }) => tc.categoryId === input.categoryId)
+        );
+      }
+
+      return results;
     }),
 
   // Create a new transaction
@@ -50,16 +68,32 @@ export const transactionRouter = createTRPCRouter({
         amount: z.number(),
         description: z.string(),
         date: z.date(),
-        categoryId: z.string().optional(),
-        source: z.enum(["manual", "csv"]).default("manual"),
+        categoryIds: z.array(z.string()).optional(),
       }),
     )
     .mutation(async ({ input }) => {
-      return db.insert(transactions).values({
-        ...input,
+      const { categoryIds, ...transactionData } = input;
+      
+      // Create transaction
+      const [transaction] = await db.insert(transactions).values({
+        ...transactionData,
         amount: input.amount.toString(),
         isFlagged: false,
-      });
+        flags: [],
+      }).returning();
+
+      // Add categories if provided
+      if (categoryIds && categoryIds.length > 0) {
+        await db.insert(transactionCategories).values(
+          categoryIds.map(categoryId => ({
+            transactionId: transaction!.id,
+            categoryId: categoryId,
+            addedBy: "user",
+          }))
+        );
+      }
+
+      return transaction;
     }),
 
   // Import transactions from CSV
@@ -72,41 +106,79 @@ export const transactionRouter = createTRPCRouter({
             amount: z.number(),
             description: z.string(),
             date: z.date(),
+            categoryIds: z.array(z.string()).optional(),
           }),
         ),
       }),
     )
     .mutation(async ({ input }) => {
-      const values = input.transactions.map((t) => ({
+      const transactionValues = input.transactions.map((t) => ({
         ...t,
         userId: input.userId,
-        source: "csv" as const,
         amount: t.amount.toString(),
         isFlagged: false,
+        flags: [],
       }));
 
-      return db.insert(transactions).values(values);
+      // Insert transactions
+      const insertedTransactions = await db.insert(transactions).values(transactionValues).returning();
+
+      // Add categories if provided
+      const categoryInserts = insertedTransactions.flatMap(transaction => {
+        const originalTransaction = input.transactions.find(t => 
+          t.amount.toString() === transaction.amount && 
+          t.description === transaction.description &&
+          t.date.getTime() === transaction.date.getTime()
+        );
+        
+        if (originalTransaction?.categoryIds) {
+          return originalTransaction.categoryIds.map(categoryId => ({
+            transactionId: transaction.id,
+            categoryId: categoryId,
+            addedBy: "user",
+          }));
+        }
+        return [];
+      });
+
+      if (categoryInserts.length > 0) {
+        await db.insert(transactionCategories).values(categoryInserts);
+      }
+
+      return insertedTransactions;
     }),
 
-  // Update transaction category
-  updateCategory: publicProcedure
+  // Update transaction categories
+  updateCategories: publicProcedure
     .input(
       z.object({
         userId: z.string(),
-        transactionIds: z.array(z.string()),
-        categoryId: z.string(),
+        transactionId: z.string(),
+        categoryIds: z.array(z.string()),
       }),
     )
     .mutation(async ({ input }) => {
-      return db
-        .update(transactions)
-        .set({ categoryId: input.categoryId })
+      // Delete existing categories
+      await db
+        .delete(transactionCategories)
         .where(
           and(
-            eq(transactions.userId, input.userId),
-            or(...input.transactionIds.map((id) => eq(transactions.id, id))),
+            eq(transactionCategories.transactionId, input.transactionId),
           ),
         );
+
+      // Add new categories
+      if (input.categoryIds.length > 0) {
+        await db.insert(transactionCategories).values(
+          input.categoryIds.map(categoryId => ({
+            transactionId: input.transactionId,
+            categoryId,
+            addedBy: "user",
+          }))
+        );
+      }
+
+      return true;
     }),
 
   // Get transactions needing review
@@ -118,12 +190,16 @@ export const transactionRouter = createTRPCRouter({
           eq(transactions.userId, input.userId),
           or(
             eq(transactions.isFlagged, true),
-            isNull(transactions.categoryId),
+            // Check if transaction has no categories
+            isNull(db.select().from(transactionCategories).where(eq(transactionCategories.transactionId, transactions.id))),
           ),
         ),
         with: {
-          category: true,
-          reviews: true,
+          categories: {
+            with: {
+              category: true,
+            },
+          },
         },
       });
     }),
@@ -134,15 +210,29 @@ export const transactionRouter = createTRPCRouter({
       z.object({
         userId: z.string(),
         transactionId: z.string(),
-        reason: z.string(),
+        flag: z.enum(["incomplete", "duplicate", "unusual_amount", "uncategorized"]),
       }),
     )
     .mutation(async ({ input }) => {
+      const transaction = await db.query.transactions.findFirst({
+        where: and(
+          eq(transactions.userId, input.userId),
+          eq(transactions.id, input.transactionId),
+        ),
+      });
+
+      if (!transaction) {
+        throw new Error("Transaction not found");
+      }
+
+      const currentFlags = transaction.flags ?? [];
+      const newFlags = [...new Set([...currentFlags, input.flag])];
+
       return db
         .update(transactions)
         .set({
-          isFlagged: true,
-          flagReason: input.reason,
+          isFlagged: newFlags.length > 0,
+          flags: newFlags,
         })
         .where(
           and(
@@ -151,4 +241,6 @@ export const transactionRouter = createTRPCRouter({
           ),
         );
     }),
+
+    
 }); 

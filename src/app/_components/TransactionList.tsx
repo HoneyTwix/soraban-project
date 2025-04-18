@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { transactions } from "~/server/db/schema";
+import Link from "next/link";
 
 type Transaction = typeof transactions.$inferSelect & {
   category: {
@@ -96,29 +97,31 @@ export function TransactionList({ userId }: { userId: string }) {
         ) : (
           <div className="space-y-2">
             {transactions?.map((transaction: Transaction) => (
-              <Card key={transaction.id}>
-                <CardContent className="p-4">
-                  <div className="flex justify-between">
-                    <div>
-                      <p className="font-semibold">{transaction.description}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {format(new Date(transaction.date), "MMM d, yyyy")}
-                      </p>
+              <Link key={transaction.id} href={`/transactions/${transaction.id}`}>
+                <Card className="hover:bg-accent transition-colors">
+                  <CardContent className="p-4">
+                    <div className="flex justify-between">
+                      <div>
+                        <p className="font-semibold">{transaction.description}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {format(new Date(transaction.date), "MMM d, yyyy")}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold">${transaction.amount}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {transaction.category?.name ?? "Uncategorized"}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold">${transaction.amount}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {transaction.category?.name ?? "Uncategorized"}
+                    {transaction.isFlagged && (
+                      <p className="mt-2 text-sm text-destructive">
+                        Flagged: {transaction.flagReason}
                       </p>
-                    </div>
-                  </div>
-                  {transaction.isFlagged && (
-                    <p className="mt-2 text-sm text-destructive">
-                      Flagged: {transaction.flagReason}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+                    )}
+                  </CardContent>
+                </Card>
+              </Link>
             ))}
           </div>
         )}

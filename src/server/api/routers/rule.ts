@@ -1,17 +1,50 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
-import { categorizationRules, anomalyRules, transactions } from "~/server/db/schema";
+import { categorizationRules, transactions, transactionCategories } from "~/server/db/schema";
 import { eq, and, isNull, gte } from "drizzle-orm";
 
 // Rule evaluation functions
-async function evaluateRule(condition: Record<string, unknown>, transaction: typeof transactions.$inferSelect): Promise<boolean> {
-  // Implement rule evaluation logic
-  return false;
-}
-
-async function evaluateAnomalyRule(condition: Record<string, unknown>, transaction: typeof transactions.$inferSelect): Promise<boolean> {
-  // Implement anomaly detection logic
+async function evaluateRule(rule: typeof categorizationRules.$inferSelect, transaction: typeof transactions.$inferSelect): Promise<boolean> {
+  switch (rule.conditionType) {
+    case "description":
+      if (rule.conditionSubtype === "contains") {
+        return transaction.description?.toLowerCase().includes(rule.conditionValue.toLowerCase()) ?? false;
+      }
+      break;
+    case "amount":
+      const amount = parseFloat(transaction.amount.toString());
+      const conditionValue = parseFloat(rule.conditionValue);
+      switch (rule.conditionSubtype) {
+        case "greater_than":
+          return amount > conditionValue;
+        case "less_than":
+          return amount < conditionValue;
+        case "equals":
+          return amount === conditionValue;
+        case "greater_than_or_equal":
+          return amount >= conditionValue;
+        case "less_than_or_equal":
+          return amount <= conditionValue;
+      }
+      break;
+    case "date":
+      const date = transaction.date;
+      const conditionDate = new Date(rule.conditionValue);
+      const optionalDate = rule.optionalConditionValue ? new Date(rule.optionalConditionValue) : null;
+      
+      switch (rule.conditionSubtype) {
+        case "before":
+          return date < conditionDate;
+        case "after":
+          return date > conditionDate;
+        case "between":
+          return optionalDate ? date >= conditionDate && date <= optionalDate : false;
+        case "not_between":
+          return optionalDate ? date < conditionDate || date > optionalDate : false;
+      }
+      break;
+  }
   return false;
 }
 
@@ -25,7 +58,6 @@ export const ruleRouter = createTRPCRouter({
         with: {
           category: true,
         },
-        orderBy: (rules) => rules.priority,
       });
     }),
 
@@ -33,16 +65,29 @@ export const ruleRouter = createTRPCRouter({
     .input(
       z.object({
         userId: z.string(),
-        categoryId: z.string(),
-        condition: z.record(z.unknown()),
-        priority: z.number().default(0),
+        name: z.string(),
+        conditionType: z.enum(["description", "amount", "date"]),
+        conditionSubtype: z.enum([
+          "contains",
+          "greater_than",
+          "less_than",
+          "equals",
+          "not_equals",
+          "before",
+          "after",
+          "between",
+          "not_between",
+          "greater_than_or_equal",
+          "less_than_or_equal"
+        ]),
+        conditionValue: z.string(),
+        optionalConditionValue: z.string().optional(),
+        aiPrompt: z.string().optional(),
+        categoryId: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
-      return db.insert(categorizationRules).values({
-        ...input,
-        isActive: true,
-      });
+      return db.insert(categorizationRules).values(input);
     }),
 
   updateCategorizationRule: publicProcedure
@@ -50,10 +95,25 @@ export const ruleRouter = createTRPCRouter({
       z.object({
         userId: z.string(),
         ruleId: z.string(),
+        name: z.string().optional(),
+        conditionType: z.enum(["description", "amount", "date"]).optional(),
+        conditionSubtype: z.enum([
+          "contains",
+          "greater_than",
+          "less_than",
+          "equals",
+          "not_equals",
+          "before",
+          "after",
+          "between",
+          "not_between",
+          "greater_than_or_equal",
+          "less_than_or_equal"
+        ]).optional(),
+        conditionValue: z.string().optional(),
+        optionalConditionValue: z.string().optional(),
+        aiPrompt: z.string().optional(),
         categoryId: z.string().optional(),
-        condition: z.record(z.unknown()).optional(),
-        priority: z.number().optional(),
-        isActive: z.boolean().optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -69,134 +129,35 @@ export const ruleRouter = createTRPCRouter({
         );
     }),
 
-  // Anomaly Detection Rules
-  getAnomalyRules: publicProcedure
-    .input(z.object({ userId: z.string() }))
-    .query(async ({ input }) => {
-      return db.query.anomalyRules.findMany({
-        where: eq(anomalyRules.userId, input.userId),
-        orderBy: (rules) => rules.name,
-      });
-    }),
-
-  createAnomalyRule: publicProcedure
-    .input(
-      z.object({
-        userId: z.string(),
-        name: z.string(),
-        description: z.string().optional(),
-        condition: z.record(z.unknown()),
-        severity: z.enum(["low", "medium", "high"]),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      return db.insert(anomalyRules).values({
-        ...input,
-        isActive: true,
-      });
-    }),
-
-  updateAnomalyRule: publicProcedure
-    .input(
-      z.object({
-        userId: z.string(),
-        ruleId: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        condition: z.record(z.unknown()).optional(),
-        severity: z.enum(["low", "medium", "high"]).optional(),
-        isActive: z.boolean().optional(),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      const { ruleId, userId, ...data } = input;
-      return db
-        .update(anomalyRules)
-        .set(data)
-        .where(
-          and(
-            eq(anomalyRules.id, ruleId),
-            eq(anomalyRules.userId, userId),
-          ),
-        );
-    }),
-
-  // Apply rules to uncategorized transactions
+  // Apply rules to transactions
   applyRules: publicProcedure
     .input(z.object({ userId: z.string() }))
     .mutation(async ({ input }) => {
-      // Get all active categorization rules
+      // Get all categorization rules
       const rules = await db.query.categorizationRules.findMany({
-        where: and(
-          eq(categorizationRules.userId, input.userId),
-          eq(categorizationRules.isActive, true),
-        ),
+        where: eq(categorizationRules.userId, input.userId),
         with: {
           category: true,
         },
-        orderBy: (rules) => rules.priority,
       });
 
-      // Get uncategorized transactions
+      // Get transactions without categories
       const uncategorized = await db.query.transactions.findMany({
-        where: and(
-          eq(transactions.userId, input.userId),
-          isNull(transactions.categoryId),
-        ),
+        where: eq(transactions.userId, input.userId),
       });
 
       // Apply rules to transactions
       for (const transaction of uncategorized) {
         for (const rule of rules) {
-          const matches = await evaluateRule(rule.condition as Record<string, unknown>, transaction);
-          if (matches) {
-            await db
-              .update(transactions)
-              .set({ categoryId: rule.categoryId })
-              .where(eq(transactions.id, transaction.id));
-            break;
-          }
-        }
-      }
-    }),
-
-  // Check for anomalies
-  checkAnomalies: publicProcedure
-    .input(
-      z.object({
-        userId: z.string(),
-        days: z.number().default(30),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      // Get all active anomaly rules
-      const rules = await db.query.anomalyRules.findMany({
-        where: and(
-          eq(anomalyRules.userId, input.userId),
-          eq(anomalyRules.isActive, true),
-        ),
-      });
-
-      // Get recent transactions
-      const recentTransactions = await db.query.transactions.findMany({
-        where: and(
-          eq(transactions.userId, input.userId),
-          gte(transactions.date, new Date(Date.now() - input.days * 24 * 60 * 60 * 1000)),
-        ),
-      });
-
-      // Check for anomalies
-      for (const transaction of recentTransactions) {
-        for (const rule of rules) {
-          const isAnomaly = await evaluateAnomalyRule(rule.condition as Record<string, unknown>, transaction);
-          if (isAnomaly) {
-            await db
-              .update(transactions)
-              .set({
-                isFlagged: true,
-                flagReason: rule.name,
-              })
-              .where(eq(transactions.id, transaction.id));
+          const matches = await evaluateRule(rule, transaction);
+          if (matches && rule.categoryId) {
+            // Add category to transaction
+            await db.insert(transactionCategories).values({
+              transactionId: transaction.id,
+              categoryId: rule.categoryId,
+              addedBy: "rule",
+              ruleId: rule.id,
+            });
           }
         }
       }

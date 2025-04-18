@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
-import { categories } from "~/server/db/schema";
+import { categories, transactionCategories } from "~/server/db/schema";
 import { eq, and } from "drizzle-orm";
 
 export const categoryRouter = createTRPCRouter({
@@ -11,6 +11,13 @@ export const categoryRouter = createTRPCRouter({
     .query(async ({ input }) => {
       return db.query.categories.findMany({
         where: eq(categories.userId, input.userId),
+        with: {
+          transactions: {
+            with: {
+              transaction: true,
+            },
+          },
+        },
         orderBy: (categories) => categories.name,
       });
     }),
@@ -60,6 +67,16 @@ export const categoryRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
+      // First delete all transaction-category relationships
+      await db
+        .delete(transactionCategories)
+        .where(
+          and(
+            eq(transactionCategories.categoryId, input.categoryId),
+          ),
+        );
+
+      // Then delete the category
       return db
         .delete(categories)
         .where(
@@ -68,5 +85,24 @@ export const categoryRouter = createTRPCRouter({
             eq(categories.userId, input.userId),
           ),
         );
+    }),
+
+  // Get transactions for a category
+  getTransactions: publicProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        categoryId: z.string(),
+      }),
+    )
+    .query(async ({ input }) => {
+      return db.query.transactionCategories.findMany({
+        where: and(
+          eq(transactionCategories.categoryId, input.categoryId),
+        ),
+        with: {
+          transaction: true,
+        },
+      });
     }),
 }); 
