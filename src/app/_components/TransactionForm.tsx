@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 interface TransactionFormProps {
   userId: string;
@@ -14,7 +16,7 @@ interface TransactionFormProps {
     description?: string;
     amount: string;
     date?: string;
-    categoryId?: string;
+    categoryIds?: string[];
   };
 }
 
@@ -22,16 +24,37 @@ export function TransactionForm({ userId, initialData }: TransactionFormProps) {
   const [description, setDescription] = useState(initialData?.description ?? "");
   const [amount, setAmount] = useState(initialData?.amount ?? "");
   const [date, setDate] = useState(initialData?.date ?? "");
-  const [categoryId, setCategoryId] = useState(initialData?.categoryId ?? "");
+  const [categoryIds, setCategoryIds] = useState<string[]>(initialData?.categoryIds ?? []);
 
   const { data: categories } = api.category.getAll.useQuery({ userId });
+  const applyRules = api.rule.applyRules.useMutation();
+  const router = useRouter();
+  const utils = api.useUtils();
+  
   const createTransaction = api.transaction.create.useMutation({
-    onSuccess: () => {
-      setDescription("");
-      setAmount("");
-      setDate("");
-      setCategoryId("");
+    onSuccess: async () => {
+      try {
+        // Invalidate transactions query to refresh the list
+        await utils.transaction.getAll.invalidate({ userId });
+        
+        // Apply rules after transaction is created
+        await applyRules.mutateAsync({
+          userId: userId,
+        });
+        
+        // Show success toast
+        toast.success("Transaction added successfully");
+        
+        // Reset form and redirect back to transactions page
+        router.push("/transactions");
+      } catch (error) {
+        console.error("Error in transaction creation:", error);
+        toast.error("Failed to create transaction");
+      }
     },
+    onError: (error) => {
+      toast.error("Failed to create transaction: " + error.message);
+    }
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -43,7 +66,7 @@ export function TransactionForm({ userId, initialData }: TransactionFormProps) {
       description,
       amount: parseFloat(amount),
       date: new Date(date),
-      categoryId: categoryId || undefined,
+      categoryIds: categoryIds.length > 0 ? categoryIds : undefined,
     });
   };
 
@@ -59,7 +82,7 @@ export function TransactionForm({ userId, initialData }: TransactionFormProps) {
             <Input
               id="description"
               value={description}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
+              onChange={(e) => setDescription(e.target.value)}
               required
             />
           </div>
@@ -71,7 +94,7 @@ export function TransactionForm({ userId, initialData }: TransactionFormProps) {
               type="number"
               step="0.01"
               value={amount}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmount(e.target.value)}
+              onChange={(e) => setAmount(e.target.value)}
               required
             />
           </div>
@@ -82,19 +105,22 @@ export function TransactionForm({ userId, initialData }: TransactionFormProps) {
               id="date"
               type="date"
               value={date}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDate(e.target.value)}
+              onChange={(e) => setDate(e.target.value)}
               required
             />
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="category">Category</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
+            <Select 
+              value={categoryIds[0] ?? "none"} 
+              onValueChange={(value) => setCategoryIds(value !== "none" ? [value] : [])}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select a category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">None</SelectItem>
+                <SelectItem value="none">None</SelectItem>
                 {categories?.map((category) => (
                   <SelectItem key={category.id} value={category.id}>
                     {category.name}

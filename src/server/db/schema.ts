@@ -1,4 +1,6 @@
 import { sql } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+import type { PgTableFn } from "drizzle-orm/pg-core";
 import {
   index,
   pgTableCreator,
@@ -10,6 +12,7 @@ import {
   jsonb,
   pgEnum,
 } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 
 export const createTable = pgTableCreator((name) => `soraban-project_${name}`);
 
@@ -102,6 +105,7 @@ export const transactions = createTable(
 export const transactionCategories = createTable(
   "transaction_category",
   (d) => ({
+    id: uuid("id").primaryKey().defaultRandom(),
     transactionId: uuid("transaction_id")
       .references(() => transactions.id)
       .notNull(),
@@ -119,3 +123,23 @@ export const transactionCategories = createTable(
     index("transaction_category_category_idx").on(t.categoryId),
   ],
 );
+
+// Define relations
+export const transactionsRelations = relations(transactions, ({ many }) => ({
+  transactionCategories: many(transactionCategories),
+}));
+
+export const categoriesRelations = relations(categories, ({ many }) => ({
+  transactionCategories: many(transactionCategories),
+}));
+
+export const transactionCategoriesRelations = relations(transactionCategories, ({ one }) => ({
+  transaction: one(transactions, {
+    fields: [transactionCategories.transactionId],
+    references: [transactions.id],
+  }),
+  category: one(categories, {
+    fields: [transactionCategories.categoryId],
+    references: [categories.id],
+  }),
+}));

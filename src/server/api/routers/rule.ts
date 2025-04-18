@@ -197,9 +197,6 @@ export const ruleRouter = createTRPCRouter({
       // Get all categorization rules
       const rules = await db.query.categorizationRules.findMany({
         where: eq(categorizationRules.userId, input.userId),
-        with: {
-          category: true,
-        },
       });
 
       // Get transactions without categories

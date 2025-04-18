@@ -11,14 +11,22 @@ export const categoryRouter = createTRPCRouter({
     .query(async ({ input }) => {
       return db.query.categories.findMany({
         where: eq(categories.userId, input.userId),
-        with: {
-          transactions: {
-            with: {
-              transaction: true,
-            },
-          },
-        },
         orderBy: (categories) => categories.name,
+      });
+    }),
+
+  // Get a category by ID
+  getCategoryById: publicProcedure
+    .input(z.object({ 
+      userId: z.string(),
+      categoryId: z.string(),
+    }))
+    .query(async ({ input }) => {
+      return db.query.categories.findFirst({
+        where: and(
+          eq(categories.id, input.categoryId),
+          eq(categories.userId, input.userId),
+        ),
       });
     }),
 

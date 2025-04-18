@@ -2,14 +2,17 @@ import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
 import { transactions, transactionCategories, categories } from "~/server/db/schema";
-import { eq, and, or, gte, lte, isNull } from "drizzle-orm";
+import { eq, and, or, gte, lte, isNull, desc } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 
-type TransactionWithCategories = InferSelectModel<typeof transactions> & {
-  categories: Array<{
-    categoryId: string;
-    category: InferSelectModel<typeof categories>;
-  }>;
+type Transaction = InferSelectModel<typeof transactions>;
+type TransactionCategory = InferSelectModel<typeof transactionCategories>;
+type Category = InferSelectModel<typeof categories>;
+
+type TransactionWithCategories = Transaction & {
+  transactionCategories: (TransactionCategory & {
+    category: Category;
+  })[];
 };
 
 export const transactionRouter = createTRPCRouter({
@@ -37,27 +40,35 @@ export const transactionRouter = createTRPCRouter({
         conditions.push(eq(transactions.isFlagged, input.isFlagged));
       }
 
-      const query = db.query.transactions.findMany({
+      const results = await db.query.transactions.findMany({
         where: and(...conditions),
+        orderBy: desc(transactions.date),
         with: {
-          categories: {
+          transactionCategories: {
             with: {
-              category: true,
-            },
-          },
-        },
-        orderBy: (transactions) => transactions.date,
-      }) as Promise<TransactionWithCategories[]>;
+              category: true
+            }
+          }
+        }
+      }) as TransactionWithCategories[];
 
-      // If category filter is provided, filter results in memory
-      const results = await query;
+      // Transform the results to match our expected type
+      const transformedResults = results.map(transaction => ({
+        ...transaction,
+        categories: transaction.transactionCategories.map(tc => ({
+          id: tc.category.id,
+          name: tc.category.name
+        }))
+      }));
+
+      // If category filter is provided, filter results
       if (input.categoryId) {
-        return results.filter((transaction: TransactionWithCategories) => 
-          transaction.categories.some((tc: { categoryId: string }) => tc.categoryId === input.categoryId)
+        return transformedResults.filter(transaction => 
+          transaction.categories.some(category => category.id === input.categoryId)
         );
       }
 
-      return results;
+      return transformedResults;
     }),
 
   // Create a new transaction
@@ -194,13 +205,6 @@ export const transactionRouter = createTRPCRouter({
             isNull(db.select().from(transactionCategories).where(eq(transactionCategories.transactionId, transactions.id))),
           ),
         ),
-        with: {
-          categories: {
-            with: {
-              category: true,
-            },
-          },
-        },
       });
     }),
 
@@ -344,5 +348,18 @@ export const transactionRouter = createTRPCRouter({
             eq(transactions.userId, input.userId),
           ),
         );
+    }),
+
+  getByCategory: publicProcedure
+    .input(z.object({ categoryId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return await ctx.db.query.transactions.findMany({
+        where: (transactions, { eq }) => 
+          eq(transactions.id, ctx.db.select({ id: transactionCategories.transactionId })
+            .from(transactionCategories)
+            .where(eq(transactionCategories.categoryId, input.categoryId))
+          ),
+        orderBy: (transactions, { desc }) => [desc(transactions.date)],
+      });
     }),
 }); 
