@@ -30,8 +30,8 @@ export const users = createTable(
 
 // Create an enum for rule types
 export const flagsEnum = pgEnum('flag_type', ['incomplete', 'duplicate', 'unusual_amount',"uncategorized",]);
-export const ruleConditionEnum = pgEnum('rule_condition_type', ['description', 'date', 'amount',]);
-export const ruleConditionSubtypeEnum = pgEnum('rule_condition_subtype', ['contains', 'greater_than', 'less_than', 'equals',"not_equals", "ai","before","after","between","not_between","greater_than_or_equal","less_than_or_equal"]);
+export const ruleConditionEnum = pgEnum('rule_condition_type', ['description', 'date', 'amount',"ai"]);
+export const ruleConditionSubtypeEnum = pgEnum('rule_condition_subtype', ['contains', 'greater_than', 'less_than', 'equals',"not_equals","before","after","between","not_between","greater_than_or_equal","less_than_or_equal"]);
 
 // Rules table
 export const categorizationRules = createTable(

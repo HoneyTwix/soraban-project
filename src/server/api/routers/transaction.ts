@@ -242,5 +242,107 @@ export const transactionRouter = createTRPCRouter({
         );
     }),
 
-    
+  // Delete a transaction
+  delete: publicProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        transactionId: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      // First delete all transaction-category relationships
+      await db
+        .delete(transactionCategories)
+        .where(
+          and(
+            eq(transactionCategories.transactionId, input.transactionId),
+          ),
+        );
+
+      // Then delete the transaction
+      return db
+        .delete(transactions)
+        .where(
+          and(
+            eq(transactions.id, input.transactionId),
+            eq(transactions.userId, input.userId),
+          ),
+        );
+    }),
+
+  // Update a transaction
+  update: publicProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        transactionId: z.string(),
+        amount: z.string().optional(),
+        description: z.string().optional(),
+        date: z.date().optional(),
+        categoryIds: z.array(z.string()).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { transactionId, userId, categoryIds, ...updateData } = input;
+
+      // Update transaction
+      await db
+        .update(transactions)
+        .set(updateData)
+        .where(
+          and(
+            eq(transactions.id, transactionId),
+            eq(transactions.userId, userId),
+          ),
+        );
+
+      // Update categories if provided
+      if (categoryIds) {
+        // Delete existing categories
+        await db
+          .delete(transactionCategories)
+          .where(
+            and(
+              eq(transactionCategories.transactionId, transactionId),
+            ),
+          );
+
+        // Add new categories
+        if (categoryIds.length > 0) {
+          await db.insert(transactionCategories).values(
+            categoryIds.map(categoryId => ({
+              transactionId,
+              categoryId,
+              addedBy: "user",
+            }))
+          );
+        }
+      }
+
+      return true;
+    }),
+
+  // Approve a flagged transaction
+  approve: publicProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        transactionId: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      return db
+        .update(transactions)
+        .set({
+          isFlagged: false,
+          flags: [],
+        })
+        .where(
+          and(
+            eq(transactions.id, input.transactionId),
+            eq(transactions.userId, input.userId),
+          ),
+        );
+    }),
 }); 
