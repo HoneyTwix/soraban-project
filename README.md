@@ -1,29 +1,87 @@
-# Create T3 App
+# Soraban Engineering Project
+The following is a take-home project for Soraban engineering candidates.
 
-This is a [T3 Stack](https://create.t3.gg/) project bootstrapped with `create-t3-app`.
+## Submission Instructions
+- Fork the repository
+- Create a pull request with your project submission
+- In the PR, include any necessary sample files and a Loom (or other video) showcasing the functionality you built and explains how the code works
 
-## What's next? How do I make an app with this?
+# **Scalable Bookkeeping System with Automated Categorization**
 
-We try to keep this project as simple as possible, so you can start with just the scaffolding we set up for you, and add additional things later when they become necessary.
+## **Objective**
 
-If you are not familiar with the different technologies used in this project, please refer to the respective docs. If you still are in the wind, please join our [Discord](https://t3.gg/discord) and ask for help.
+Build a **minimal yet scalable bookkeeping system** with the following features:
 
-- [Next.js](https://nextjs.org)
-- [NextAuth.js](https://next-auth.js.org)
-- [Prisma](https://prisma.io)
-- [Drizzle](https://orm.drizzle.team)
-- [Tailwind CSS](https://tailwindcss.com)
-- [tRPC](https://trpc.io)
+1. **Record & Import Transactions** – Users can manually add transactions or import a CSV.
+2. **Bulk Actions & Automated Categorization** – Users can categorize multiple transactions at once, and automatically assign category (AI-based or rule based).
+3. **Anomaly Detection** – Identify and flag unusual/suspicous transactions (e.g., large amounts, duplicates, missing metadata).
+4. **Scalability & Performance Optimization** – Efficiently handle large data sets (e.g., 50k+ transactions).
+5. **User-friendly Review System** – A dashboard that highlights transactions needing review.
 
-## Learn More
+## **Tech Stack**
 
-To learn more about the [T3 Stack](https://create.t3.gg/), take a look at the following resources:
+- **Backend:** Ruby on Rails (preferred), Node.js, Django, or similar.
+- **Frontend:** React (preferred) or Vue.js.
+- **Database:** PostgreSQL (preferred) or MySQL.
 
-- [Documentation](https://create.t3.gg/)
-- [Learn the T3 Stack](https://create.t3.gg/en/faq#what-learning-resources-are-currently-available) — Check out these awesome tutorials
+## **Project Requirements**
 
-You can check out the [create-t3-app GitHub repository](https://github.com/t3-oss/create-t3-app) — your feedback and contributions are welcome!
+### **1. Record & Import Transactions**
 
-## How do I deploy this?
+- Users can **manually add transactions** (date, description, amount, category).
+- Users can **import a CSV file** containing transactions.
+- CSV parsing should handle **edge cases** (missing fields, malformed data, duplicates).
 
-Follow our deployment guides for [Vercel](https://create.t3.gg/en/deployment/vercel), [Netlify](https://create.t3.gg/en/deployment/netlify) and [Docker](https://create.t3.gg/en/deployment/docker) for more information.
+### **2. Bulk Actions & Rule-based Categorization**
+
+- Users can **select multiple transactions** and apply bulk categorization.
+- Users can create **rules** like:
+    - “If the description contains ‘Amazon’, categorize as ‘Shopping’.”
+    - “If amount > $1000, flag as ‘High Value’.”
+- **Rules should apply automatically** when new transactions are added.
+
+### **3. Anomaly Detection & Fraud Prevention (Challenging Part)**
+
+- Identify transactions that are:
+    - **Unusual in amount** compared to past user behavior.
+    - **Potential duplicates** (same amount, date, with same descriptions).
+    - **Incomplete/missing metadata** (e.g., description missing).
+- Flag these anomalies and display them on the **Review Dashboard (Step 5)**
+
+### **4. Scalability & Performance Optimization**
+
+- Your system should handle **50k+ transactions efficiently**.
+- Consider **indexing, caching, or batch processing** for performance.
+
+### **5. Review System & UX (Final Challenge)**
+
+- A simple **dashboard** that highlights:
+    - **Uncategorized transactions** needing user review.
+    - **Flagged anomalies** requiring manual verification.
+- Users should be able to **approve, edit, or delete** flagged transactions.
+
+## **Bonus Challenges (For the Overachievers)**
+
+1. **Basic API for Transactions** – Expose a REST API for CRUD operations.
+2. **Real-time Anomaly Detection** – Use WebSockets or polling for updates.
+3. **Graph-based Spending Summary** – Show user spending trends.
+
+## **What We’re Evaluating**
+
+✅ **Code Quality & Architecture** – Clean, modular, and scalable.
+
+✅ **Performance & Efficiency** – Handles large datasets without slowdowns.
+
+✅ **Complex Logic Implementation** – Anomaly detection & rules engine.
+
+✅ **Good UX for Complex Actions** – Well-designed transaction review.
+
+✅ **AI Resistance** – Requires thoughtful **business logic, rule handling, and anomaly detection**, which AI struggles to generate effectively.
+
+✅ **Problem-Solving Skills** – Ability to balance features, scalability, and performance.
+
+## Similar Products Examples for Inspiration
+
+- Kick.co
+- Quickbooks Online
+- Xero
