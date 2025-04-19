@@ -1,10 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "~/trpc/react";
 import { useUser } from "@clerk/nextjs";
 
 export function useTransactionFlagging() {
   const { user } = useUser();
   const hasProcessedRef = useRef(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const lastTransactionCountRef = useRef(0);
+  const utils = api.useUtils();
 
   // Get all transactions to analyze
   const { data: transactions, isLoading: isLoadingTransactions, isFetching } = api.transaction.getAll.useQuery(
@@ -17,8 +20,18 @@ export function useTransactionFlagging() {
   );
 
   const flagTransaction = api.transaction.flag.useMutation({
+    onSuccess: async () => {
+      // Invalidate queries to refresh the UI
+      await Promise.all([
+        utils.transaction.getAll.invalidate({ userId: user?.id ?? "" }),
+        utils.transaction.getNeedingReview.invalidate({ userId: user?.id ?? "" })
+      ]);
+      // Set processing to false after each flag is found
+      setIsProcessing(false);
+    },
     onError: (error) => {
       console.error("Error flagging transaction:", error);
+      setIsProcessing(false);
     }
   });
 
@@ -26,10 +39,35 @@ export function useTransactionFlagging() {
     let isMounted = true;
 
     const processTransactions = async () => {
-      if (!user || !transactions || hasProcessedRef.current || isLoadingTransactions || isFetching) return;
+      // Skip if no transactions or still loading
+      if (!user || !transactions || isLoadingTransactions || isFetching) {
+        setIsProcessing(false);
+        return;
+      }
+
+      // Skip if no transactions to process
+      if (transactions.length === 0) {
+        setIsProcessing(false);
+        hasProcessedRef.current = true;
+        return;
+      }
+
+      // Reset processing state if transaction count has changed
+      const currentTransactionCount = transactions.length;
+      if (currentTransactionCount !== lastTransactionCountRef.current) {
+        hasProcessedRef.current = false;
+        lastTransactionCountRef.current = currentTransactionCount;
+      }
+
+      // Skip if already processed
+      if (hasProcessedRef.current) {
+        setIsProcessing(false);
+        return;
+      }
 
       try {
         hasProcessedRef.current = true;
+        setIsProcessing(true);
 
         // Function to calculate average amount
         const calculateAverage = (amounts: number[]) => {
@@ -49,13 +87,20 @@ export function useTransactionFlagging() {
         // Create a map to track duplicates
         const transactionMap = new Map();
 
-        // Process transactions sequentially to avoid race conditions
-        for (const transaction of transactions) {
-          if (!isMounted) return; // Stop if component unmounted
+        // Pre-calculate all amounts for better performance
+        const transactionAmounts = transactions.map(t => parseFloat(t.amount.toString()));
+        const avgAmount = calculateAverage(transactionAmounts);
+        const stdDev = calculateStdDev(transactionAmounts, avgAmount);
+        const upperThreshold = avgAmount + 2 * stdDev;
+        const lowerThreshold = avgAmount - 2 * stdDev;
+
+        // Process transactions in parallel
+        const processPromises = transactions.map(async (transaction) => {
+          if (!isMounted) return;
 
           // Skip if transaction has been previously approved
           if (transaction.wasApproved) {
-            continue;
+            return;
           }
 
           const amount = parseFloat(transaction.amount.toString());
@@ -71,16 +116,6 @@ export function useTransactionFlagging() {
               });
             }
             transactionMap.set(key, transaction);
-
-            // Calculate average and std dev excluding current transaction
-            const otherTransactions = transactions.filter(t => t.id !== transaction.id);
-            const otherAmounts = otherTransactions.map(t => parseFloat(t.amount.toString()));
-            const avgAmount = calculateAverage(otherAmounts);
-            const stdDev = calculateStdDev(otherAmounts, avgAmount);
-
-            // Define thresholds for outliers (2 standard deviations)
-            const upperThreshold = avgAmount + 2 * stdDev;
-            const lowerThreshold = avgAmount - 2 * stdDev;
 
             // Check for unusual amount (outliers both high and low)
             if (amount > upperThreshold || amount < lowerThreshold) {
@@ -110,14 +145,17 @@ export function useTransactionFlagging() {
             }
           } catch (error) {
             console.error("Error processing transaction:", transaction.id, error);
-            continue;
           }
+        });
 
-          // Add a small delay between transactions to prevent overwhelming the server
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
+        // Wait for all transactions to be processed
+        await Promise.all(processPromises);
       } catch (error) {
         console.error("Error in processTransactions:", error);
+      } finally {
+        if (isMounted) {
+          setIsProcessing(false);
+        }
       }
     };
 
@@ -126,5 +164,7 @@ export function useTransactionFlagging() {
     return () => {
       isMounted = false;
     };
-  }, [user, transactions, isLoadingTransactions, isFetching, flagTransaction]);
+  }, [user, transactions, isLoadingTransactions, isFetching, flagTransaction, utils]);
+
+  return { isProcessing };
 } 
