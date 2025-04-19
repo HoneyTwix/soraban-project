@@ -1,23 +1,31 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
 
 const isPublicRoute = createRouteMatcher([
-  '/sign-in(.*)',
-  '/sign-up(.*)',
+  '/',
+  '/api/llm-route',
   '/api/trpc/(.*)',
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
   if (isPublicRoute(req)) {
-    return;
+    return NextResponse.next();
   }
-  await auth.protect();
+  
+  const isAuthed = await auth.protect();
+  return isAuthed ? NextResponse.next() : NextResponse.redirect(new URL('/sign-in', req.url));
 });
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
-    '/(api|trpc)(.*)',
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public (public files)
+     */
+    '/((?!_next/static|_next/image|favicon.ico|public).*)',
+    '/api/:path*'
   ],
 }; 

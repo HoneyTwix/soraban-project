@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
 import { transactions, transactionCategories, categories } from "~/server/db/schema";
-import { eq, and, or, gte, lte, isNull, desc } from "drizzle-orm";
+import { eq, and, or, gte, lte, isNull, desc, inArray } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 
 type Transaction = InferSelectModel<typeof transactions>;
@@ -199,12 +199,16 @@ export const transactionRouter = createTRPCRouter({
       return db.query.transactions.findMany({
         where: and(
           eq(transactions.userId, input.userId),
-          or(
-            eq(transactions.isFlagged, true),
-            // Check if transaction has no categories
-            isNull(db.select().from(transactionCategories).where(eq(transactionCategories.transactionId, transactions.id))),
-          ),
+          eq(transactions.isFlagged, true)
         ),
+        with: {
+          transactionCategories: {
+            with: {
+              category: true
+            }
+          }
+        },
+        orderBy: desc(transactions.date),
       });
     }),
 
@@ -220,8 +224,8 @@ export const transactionRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       const transaction = await db.query.transactions.findFirst({
         where: and(
-          eq(transactions.userId, input.userId),
           eq(transactions.id, input.transactionId),
+          eq(transactions.userId, input.userId),
         ),
       });
 
@@ -229,21 +233,26 @@ export const transactionRouter = createTRPCRouter({
         throw new Error("Transaction not found");
       }
 
+      // Get current flags and add new flag if not already present
       const currentFlags = transaction.flags ?? [];
-      const newFlags = [...new Set([...currentFlags, input.flag])];
+      if (!currentFlags.includes(input.flag)) {
+        const newFlags = [...currentFlags, input.flag];
 
-      return db
-        .update(transactions)
-        .set({
-          isFlagged: newFlags.length > 0,
-          flags: newFlags,
-        })
-        .where(
-          and(
-            eq(transactions.userId, input.userId),
-            eq(transactions.id, input.transactionId),
-          ),
-        );
+        await db
+          .update(transactions)
+          .set({
+            isFlagged: true,
+            flags: newFlags,
+          })
+          .where(
+            and(
+              eq(transactions.id, input.transactionId),
+              eq(transactions.userId, input.userId),
+            ),
+          );
+      }
+
+      return transaction;
     }),
 
   // Delete a transaction
@@ -255,24 +264,37 @@ export const transactionRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
-      // First delete all transaction-category relationships
-      await db
-        .delete(transactionCategories)
-        .where(
-          and(
-            eq(transactionCategories.transactionId, input.transactionId),
-          ),
-        );
+      // Verify transaction exists and belongs to user
+      const transaction = await db.query.transactions.findFirst({
+        where: and(
+          eq(transactions.id, input.transactionId),
+          eq(transactions.userId, input.userId),
+        ),
+      });
 
-      // Then delete the transaction
-      return db
-        .delete(transactions)
-        .where(
-          and(
-            eq(transactions.id, input.transactionId),
-            eq(transactions.userId, input.userId),
-          ),
-        );
+      if (!transaction) {
+        throw new Error("Transaction not found");
+      }
+
+      // Delete everything related to this transaction in a specific order
+      await db.transaction(async (tx) => {
+        // 1. Delete transaction-category relationships
+        await tx
+          .delete(transactionCategories)
+          .where(eq(transactionCategories.transactionId, input.transactionId));
+
+        // 2. Delete the transaction itself
+        await tx
+          .delete(transactions)
+          .where(
+            and(
+              eq(transactions.id, input.transactionId),
+              eq(transactions.userId, input.userId),
+            ),
+          );
+      });
+
+      return { success: true };
     }),
 
   // Update a transaction
@@ -341,6 +363,7 @@ export const transactionRouter = createTRPCRouter({
         .set({
           isFlagged: false,
           flags: [],
+          wasApproved: true,
         })
         .where(
           and(
@@ -361,5 +384,104 @@ export const transactionRouter = createTRPCRouter({
           ),
         orderBy: (transactions, { desc }) => [desc(transactions.date)],
       });
+    }),
+
+  getById: publicProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        transactionId: z.string(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const transaction = await ctx.db.query.transactions.findFirst({
+        where: and(
+          eq(transactions.id, input.transactionId),
+          eq(transactions.userId, input.userId)
+        ),
+        with: {
+          transactionCategories: {
+            with: {
+              category: true
+            }
+          }
+        }
+      });
+
+      if (!transaction) {
+        throw new Error("Transaction not found");
+      }
+
+      return {
+        ...transaction,
+        categories: transaction.transactionCategories.map(tc => ({
+          id: tc.category.id,
+          name: tc.category.name
+        }))
+      };
+    }),
+
+  // Bulk categorize multiple transactions
+  bulkCategorize: publicProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+        transactionIds: z.array(z.string()),
+        categoryIds: z.array(z.string()),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { userId, transactionIds, categoryIds } = input;
+
+      // Verify all transactions exist and belong to the user
+      const foundTransactions = await db.query.transactions.findMany({
+        where: and(
+          eq(transactions.userId, userId),
+          inArray(transactions.id, transactionIds)
+        ),
+      });
+
+      if (foundTransactions.length !== transactionIds.length) {
+        throw new Error("One or more transactions not found or do not belong to the user");
+      }
+
+      // Delete existing categories for these transactions
+      await db
+        .delete(transactionCategories)
+        .where(
+          and(
+            inArray(transactionCategories.transactionId, transactionIds)
+          )
+        );
+
+      // Add new categories for all transactions
+      if (categoryIds.length > 0) {
+        const categoryInserts = transactionIds.flatMap(transactionId =>
+          categoryIds.map(categoryId => ({
+            transactionId,
+            categoryId,
+            addedBy: "user",
+          }))
+        );
+
+        await db.insert(transactionCategories).values(categoryInserts);
+      }
+
+      // Update wasApproved flag for all transactions
+      await db
+        .update(transactions)
+        .set({
+          wasApproved: true,
+          isFlagged: false,
+          flags: [],
+        })
+        .where(
+          and(
+            eq(transactions.userId, userId),
+            inArray(transactions.id, transactionIds)
+          )
+        );
+
+      return { success: true, count: transactionIds.length };
     }),
 }); 

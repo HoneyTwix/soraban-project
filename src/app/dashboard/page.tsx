@@ -1,7 +1,78 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowDown, ArrowUp, DollarSign, AlertCircle } from "lucide-react";
+import { useUser } from "@clerk/nextjs";
+import { api } from "~/trpc/react";
+import { redirect } from "next/navigation";
+import { formatCurrency } from "~/lib/utils";
 
 export default function DashboardPage() {
+  const { user } = useUser();
+  const { data: transactions, isLoading: isLoadingTransactions } = api.transaction.getAll.useQuery(
+    { userId: user?.id ?? "" },
+    { enabled: !!user }
+  );
+  const { data: reviewTransactions, isLoading: isLoadingReviews } = api.transaction.getNeedingReview.useQuery(
+    { userId: user?.id ?? "" },
+    { enabled: !!user }
+  );
+
+  if (!user) {
+    redirect("/sign-in");
+  }
+
+  if (isLoadingTransactions || isLoadingReviews) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="text-center text-muted-foreground">
+          Loading dashboard...
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate analytics
+  const totalIncome = transactions?.reduce((sum, t) => {
+    const amount = parseFloat(t.amount);
+    return amount > 0 ? sum + amount : sum;
+  }, 0) ?? 0;
+
+  const totalExpenses = transactions?.reduce((sum, t) => {
+    const amount = parseFloat(t.amount);
+    return amount < 0 ? sum + Math.abs(amount) : sum;
+  }, 0) ?? 0;
+
+  const netBalance = totalIncome - totalExpenses;
+  const itemsToReview = reviewTransactions?.length ?? 0;
+
+  // Get recent transactions
+  const recentTransactions = transactions?.slice(0, 5) ?? [];
+
+  // Calculate category totals
+  const categoryTotals = transactions?.reduce((acc, t) => {
+    if (t.categories && t.categories.length > 0) {
+      t.categories.forEach(category => {
+        const categoryName = category.name;
+        const amount = parseFloat(t.amount);
+        // For expenses, only count negative amounts
+        if (amount < 0) {
+          acc[categoryName] = (acc[categoryName] ?? 0) + Math.abs(amount);
+        }
+      });
+    }
+    return acc;
+  }, {} as Record<string, number>) ?? {};
+
+  // Convert to array and sort by amount
+  const categoryOverview = Object.entries(categoryTotals)
+    .map(([name, amount]) => ({ name, amount }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
+
+  // Calculate total expenses for percentage (only from categories)
+  const totalExpensesForPercentage = Object.values(categoryTotals).reduce((sum, amount) => sum + amount, 0) || 1; // Prevent division by zero
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
@@ -13,9 +84,9 @@ export default function DashboardPage() {
             <ArrowUp className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$12,345</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalIncome)}</div>
             <p className="text-xs text-muted-foreground">
-              +20.1% from last month
+              {transactions?.length ?? 0} transactions
             </p>
           </CardContent>
         </Card>
@@ -26,9 +97,9 @@ export default function DashboardPage() {
             <ArrowDown className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$8,765</div>
+            <div className="text-2xl font-bold">{formatCurrency(totalExpenses)}</div>
             <p className="text-xs text-muted-foreground">
-              -5.2% from last month
+              {transactions?.length ?? 0} transactions
             </p>
           </CardContent>
         </Card>
@@ -39,9 +110,9 @@ export default function DashboardPage() {
             <DollarSign className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$3,580</div>
+            <div className="text-2xl font-bold">{formatCurrency(netBalance)}</div>
             <p className="text-xs text-muted-foreground">
-              +25.3% from last month
+              {netBalance >= 0 ? "Positive" : "Negative"} balance
             </p>
           </CardContent>
         </Card>
@@ -52,9 +123,9 @@ export default function DashboardPage() {
             <AlertCircle className="h-4 w-4 text-yellow-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
+            <div className="text-2xl font-bold">{itemsToReview}</div>
             <p className="text-xs text-muted-foreground">
-              5 new since yesterday
+              {itemsToReview === 0 ? "All clear!" : "Needs attention"}
             </p>
           </CardContent>
         </Card>
@@ -67,44 +138,62 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Amazon Purchase</p>
-                  <p className="text-sm text-muted-foreground">Today, 2:30 PM</p>
+              {recentTransactions.map((transaction) => (
+                <div key={transaction.id} className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{transaction.description ?? "No Description"}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {new Date(transaction.date).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <p className={parseFloat(transaction.amount) >= 0 ? "text-green-500" : "text-red-500"}>
+                    {formatCurrency(parseFloat(transaction.amount))}
+                  </p>
                 </div>
-                <p className="text-red-500">-$129.99</p>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Salary Deposit</p>
-                  <p className="text-sm text-muted-foreground">Today, 9:00 AM</p>
-                </div>
-                <p className="text-green-500">+$5,000.00</p>
-              </div>
+              ))}
             </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Categories Overview</CardTitle>
+            <CardTitle>Most Used Categories</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Shopping</p>
-                  <p className="text-sm text-muted-foreground">25% of expenses</p>
-                </div>
-                <p className="text-red-500">-$1,234.56</p>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">Utilities</p>
-                  <p className="text-sm text-muted-foreground">15% of expenses</p>
-                </div>
-                <p className="text-red-500">-$740.74</p>
-              </div>
+              {(() => {
+                // Count transactions per category
+                const categoryCount: Record<string, { count: number; name: string }> = {};
+                
+                transactions?.forEach(transaction => {
+                  transaction.categories?.forEach(category => {
+                    const categoryEntry = categoryCount[category.id];
+                    if (!categoryEntry) {
+                      categoryCount[category.id] = { count: 0, name: category.name };
+                    }
+                    categoryCount[category.id]!.count++;
+                  });
+                });
+
+                // Convert to array and sort by count
+                return Object.entries(categoryCount)
+                  .map(([id, { count, name }]) => ({ id, name, count }))
+                  .sort((a, b) => b.count - a.count)
+                  .slice(0, 5)
+                  .map(category => (
+                    <div key={category.id} className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{category.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {category.count} transaction{category.count !== 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <p className="text-muted-foreground">
+                        {Math.round((category.count / (transactions?.length ?? 1)) * 100)}%
+                      </p>
+                    </div>
+                  ));
+              })()}
             </div>
           </CardContent>
         </Card>

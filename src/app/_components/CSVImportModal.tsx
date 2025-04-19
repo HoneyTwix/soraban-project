@@ -29,12 +29,20 @@ interface CSVImportModalProps {
 export function CSVImportModal({ isOpen, onClose, userId }: CSVImportModalProps) {
   const [transactions, setTransactions] = useState<CSVTransaction[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const utils = api.useUtils();
 
   const importMutation = api.transaction.importFromCsv.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Invalidate both queries to ensure all transaction lists are updated
+      await Promise.all([
+        utils.transaction.getAll.invalidate({ userId }),
+        utils.transaction.getNeedingReview.invalidate({ userId })
+      ]);
       onClose();
-      // Optionally refresh the transactions list
     },
+    onError: (error) => {
+      console.error("Error importing transactions:", error);
+    }
   });
 
   const downloadTemplate = () => {

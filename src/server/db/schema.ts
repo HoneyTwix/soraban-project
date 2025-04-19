@@ -93,6 +93,7 @@ export const transactions = createTable(
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).$onUpdate(() => new Date()),
+    wasApproved: boolean("was_approved").notNull().default(false),
   }),
   (t) => [
     index("transaction_user_id_idx").on(t.userId),
@@ -131,6 +132,14 @@ export const transactionsRelations = relations(transactions, ({ many }) => ({
 
 export const categoriesRelations = relations(categories, ({ many }) => ({
   transactionCategories: many(transactionCategories),
+  rules: many(categorizationRules),
+}));
+
+export const categorizationRulesRelations = relations(categorizationRules, ({ one }) => ({
+  category: one(categories, {
+    fields: [categorizationRules.categoryId],
+    references: [categories.id],
+  }),
 }));
 
 export const transactionCategoriesRelations = relations(transactionCategories, ({ one }) => ({

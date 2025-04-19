@@ -1,12 +1,11 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus } from "lucide-react";
 import { redirect, useRouter } from "next/navigation";
-import { v4 as uuidv4 } from "uuid";
 import { api } from "~/trpc/react";
 import { useUser } from "@clerk/nextjs";
+import { CategoryList } from "~/app/_components/CategoryList";
 
 export default function CategoriesPage() {
   const router = useRouter();
@@ -20,7 +19,7 @@ export default function CategoriesPage() {
     router.push('/categories/new');
   };
 
-  if (!user?.id) {
+  if (!user) {
     redirect("/sign-in");
   }
 
@@ -51,34 +50,11 @@ export default function CategoriesPage() {
         </Button>
       </div>
 
-      {categories && categories.length > 0 ? (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {categories.map((category) => (
-            <Card
-              key={category.id}
-              className="cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => router.push(`/categories/${category.id}`)}
-            >
-              <CardHeader>
-                <CardTitle>{category.name}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-muted-foreground">
-                  {category.description ?? "No description provided"}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <Card>
-          <CardContent className="text-center py-8">
-            <div className="text-muted-foreground">
-              No categories yet. Click &quot;Add Category&quot; to create your first category.
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <CategoryList 
+        categories={categories ?? []} 
+        maxHeight="70vh" 
+        userId={user.id}
+      />
     </div>
   );
 } 

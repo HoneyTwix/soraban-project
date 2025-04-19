@@ -3,6 +3,13 @@ import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
 import { db } from "~/server/db";
 import { categorizationRules, transactions, transactionCategories, categories } from "~/server/db/schema";
 import { eq, and } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+
+type Transaction = InferSelectModel<typeof transactions>;
+type Rule = InferSelectModel<typeof categorizationRules>;
+type TransactionWithCategories = Transaction & {
+  transactionCategories: { categoryId: string }[];
+};
 
 // Rule evaluation functions
 async function evaluateRule(rule: typeof categorizationRules.$inferSelect, transaction: typeof transactions.$inferSelect): Promise<boolean> {
@@ -54,10 +61,17 @@ async function evaluateRule(rule: typeof categorizationRules.$inferSelect, trans
       if (!category) return false;
 
       try {
-        const response = await fetch("/api/llm-route", {
+        // Use absolute URL for the API endpoint
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+        const apiUrl = new URL("/api/llm-route", baseUrl);
+        
+        
+        const response = await fetch(apiUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            // Add custom header to identify internal request
+            "X-Internal-Request": "true"
           },
           body: JSON.stringify({
             transaction_date: transaction.date.toISOString(),
@@ -72,10 +86,13 @@ async function evaluateRule(rule: typeof categorizationRules.$inferSelect, trans
         });
 
         if (!response.ok) {
-          throw new Error(`AI evaluation failed: ${response.statusText}`);
+          const errorText = await response.text();
+          console.error("API Error Response:", errorText);
+          throw new Error(`AI evaluation failed: ${response.statusText} - ${errorText}`);
         }
 
         const result = (await response.json()) as { decision: "apply" | "do not apply" };
+        console.log("API Response:", result);
         return result.decision === "apply";
       } catch (error) {
         console.error("AI evaluation failed:", error);
@@ -199,25 +216,67 @@ export const ruleRouter = createTRPCRouter({
         where: eq(categorizationRules.userId, input.userId),
       });
 
-      // Get transactions without categories
-      const uncategorized = await db.query.transactions.findMany({
+      // Get all transactions with their categories
+      const userTransactions = await db.query.transactions.findMany({
         where: eq(transactions.userId, input.userId),
-      });
+        with: {
+          transactionCategories: {
+            columns: {
+              categoryId: true,
+            },
+          },
+        },
+      }) as TransactionWithCategories[];
 
       // Apply rules to transactions
-      for (const transaction of uncategorized) {
+      for (const transaction of userTransactions) {
+        // Get existing category IDs for this transaction
+        const existingCategoryIds = new Set(
+          transaction.transactionCategories.map((tc: { categoryId: string }) => tc.categoryId)
+        );
+
         for (const rule of rules) {
+          // Skip if the category is already applied
+          if (rule.categoryId && existingCategoryIds.has(rule.categoryId)) {
+            continue;
+          }
+
+          // Skip AI rules if the category is already applied
+          if (rule.conditionType === "ai" && rule.categoryId && existingCategoryIds.has(rule.categoryId)) {
+            continue;
+          }
+
           const matches = await evaluateRule(rule, transaction);
-          if (matches && rule.categoryId) {
-            // Add category to transaction
+          // Only add the category if it matches and hasn't been added yet
+          if (matches && rule.categoryId && !existingCategoryIds.has(rule.categoryId)) {
             await db.insert(transactionCategories).values({
               transactionId: transaction.id,
               categoryId: rule.categoryId,
               addedBy: "rule",
               ruleId: rule.id,
             });
+            // Add to set of existing categories to prevent duplicates in subsequent rules
+            existingCategoryIds.add(rule.categoryId);
           }
         }
       }
+    }),
+
+  // Get a single rule by ID
+  getRuleById: publicProcedure
+    .input(z.object({
+      userId: z.string(),
+      ruleId: z.string(),
+    }))
+    .query(async ({ input }) => {
+      return db.query.categorizationRules.findFirst({
+        where: and(
+          eq(categorizationRules.id, input.ruleId),
+          eq(categorizationRules.userId, input.userId),
+        ),
+        with: {
+          category: true,
+        },
+      });
     }),
 }); 

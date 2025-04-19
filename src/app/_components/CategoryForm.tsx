@@ -1,14 +1,36 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { api } from "~/trpc/react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
-import { Label } from "~/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
+
+const formSchema = z.object({
+  name: z.string()
+    .min(1, "Category name is required")
+    .max(50, "Category name cannot exceed 50 characters")
+    .refine(name => name.trim().length > 0, "Category name cannot be only whitespace"),
+  description: z.string()
+    .max(500, "Description cannot exceed 500 characters")
+    .optional()
+    .transform(val => val === "" ? undefined : val),
+});
+
+type FormValues = z.infer<typeof formSchema>;
 
 interface CategoryFormProps {
   userId: string;
@@ -22,16 +44,14 @@ interface CategoryFormProps {
 export function CategoryForm({ userId, initialData, categoryId }: CategoryFormProps) {
   const router = useRouter();
   const utils = api.useUtils();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
 
-  // Update form values when initialData changes
-  useEffect(() => {
-    if (initialData) {
-      setName(initialData.name ?? "");
-      setDescription(initialData.description ?? "");
-    }
-  }, [initialData]);
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      name: initialData?.name ?? "",
+      description: initialData?.description ?? "",
+    },
+  });
 
   const createCategory = api.category.create.useMutation({
     onSuccess: async () => {
@@ -57,28 +77,22 @@ export function CategoryForm({ userId, initialData, categoryId }: CategoryFormPr
 
   const isPending = createCategory.isPending || updateCategory.isPending;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      toast.error("Category name is required");
-      return;
-    }
-
+  function onSubmit(values: FormValues) {
     if (categoryId !== undefined) {
       updateCategory.mutate({
         userId,
         categoryId: categoryId,
-        name: name.trim(),
-        description: description.trim() || undefined,
+        name: values.name.trim(),
+        description: values.description,
       });
     } else {
       createCategory.mutate({
-        name: name.trim(),
-        description: description.trim() || undefined,
+        name: values.name.trim(),
+        description: values.description,
         userId,
       });
     }
-  };
+  }
 
   return (
     <Card>
@@ -86,41 +100,61 @@ export function CategoryForm({ userId, initialData, categoryId }: CategoryFormPr
         <CardTitle>{categoryId ? "Edit Category" : "New Category"}</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter category name"
-              required
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Name</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Enter category name" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="description">Description (Optional)</Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Enter category description"
-              rows={4}
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Enter category description"
+                      rows={4}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-          </div>
 
-          <Button
-            type="submit"
-            disabled={isPending}
-            className="w-full"
-          >
-            {isPending
-              ? "Saving..."
-              : categoryId
-              ? "Save Changes"
-              : "Create Category"}
-          </Button>
-        </form>
+            <div className="flex justify-end space-x-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => router.push("/categories")}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={isPending}
+              >
+                {isPending
+                  ? "Saving..."
+                  : categoryId
+                  ? "Save Changes"
+                  : "Create Category"}
+              </Button>
+            </div>
+          </form>
+        </Form>
       </CardContent>
     </Card>
   );
