@@ -7,11 +7,15 @@ import { useState } from "react";
 import { CSVImportModal } from "~/app/_components/CSVImportModal";
 import { TransactionList } from "~/app/_components/TransactionList";
 import { useUser } from "@clerk/nextjs";
+import { useTransactionFlagging } from "~/hooks/useTransactionFlagging";
 
 export default function TransactionsPage() {
   const router = useRouter();
   const { user } = useUser();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  
+  // Use the transaction flagging hook
+  useTransactionFlagging();
 
   const handleAddTransaction = () => {
     router.push(`/transactions/new`);

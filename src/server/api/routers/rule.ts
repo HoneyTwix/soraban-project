@@ -197,6 +197,12 @@ export const ruleRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
+      // First delete all transaction categories associated with this rule
+      await db
+        .delete(transactionCategories)
+        .where(eq(transactionCategories.ruleId, input.ruleId));
+
+      // Then delete the rule
       return db
         .delete(categorizationRules)
         .where(
@@ -269,7 +275,7 @@ export const ruleRouter = createTRPCRouter({
       ruleId: z.string(),
     }))
     .query(async ({ input }) => {
-      return db.query.categorizationRules.findFirst({
+      const rule = await db.query.categorizationRules.findFirst({
         where: and(
           eq(categorizationRules.id, input.ruleId),
           eq(categorizationRules.userId, input.userId),
@@ -278,5 +284,14 @@ export const ruleRouter = createTRPCRouter({
           category: true,
         },
       });
+
+      if (!rule) {
+        return null;
+      }
+
+      return {
+        ...rule,
+        category: rule.category ?? null,
+      };
     }),
 }); 

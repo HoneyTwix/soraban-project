@@ -28,11 +28,21 @@ export function RulesList({ userId, maxHeight = "calc(100vh - 200px)" }: RulesLi
     },
   });
 
-  const handleDeleteRule = (ruleId: string) => {
-    deleteRuleMutation.mutate({
-      userId,
-      ruleId,
-    });
+  const handleDeleteRule = async (e: React.MouseEvent, ruleId: string) => {
+    e.stopPropagation();
+    if (!userId) {
+      toast.error("User ID is required");
+      return;
+    }
+    try {
+      await deleteRuleMutation.mutateAsync({
+        userId,
+        ruleId,
+      });
+    } catch (error) {
+      console.error("Failed to delete rule:", error);
+      toast.error("Failed to delete rule");
+    }
   };
 
   if (isLoading) {
@@ -98,12 +108,12 @@ export function RulesList({ userId, maxHeight = "calc(100vh - 200px)" }: RulesLi
                     <AlertDialogHeader>
                       <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This action cannot be undone. This will permanently delete the rule "{rule.name}".
+                        This action cannot be undone. This will permanently delete the rule &quot;{rule.name}&quot;.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => handleDeleteRule(rule.id)}>
+                      <AlertDialogAction onClick={(e) => handleDeleteRule(e, rule.id)}>
                         Delete
                       </AlertDialogAction>
                     </AlertDialogFooter>

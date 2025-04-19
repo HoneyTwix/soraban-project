@@ -3,9 +3,13 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ReviewList } from "~/app/_components/ReviewList";
 import { useUser } from "@clerk/nextjs";
+import { useTransactionFlagging } from "~/hooks/useTransactionFlagging";
 
 export default function ReviewsPage() {
   const { user } = useUser();
+  
+  // Use the transaction flagging hook
+  useTransactionFlagging();
 
   if (!user) return null;
 

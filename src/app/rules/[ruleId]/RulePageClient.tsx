@@ -5,6 +5,7 @@ import { useUser } from "@clerk/nextjs";
 import { RuleForm } from "~/app/_components/RuleForm";
 import { api } from "~/trpc/react";
 import { redirect, useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 interface RulePageClientProps {
   ruleId: string;
@@ -18,21 +19,21 @@ export default function RulePageClient({ ruleId }: RulePageClientProps) {
     redirect("/sign-in");
   }
 
-  const { data: rule, isLoading, error } = api.rule.getRuleById.useQuery(
+  const { data: rule, isLoading } = api.rule.getRuleById.useQuery(
     {
       userId: user.id,
       ruleId,
     },
     {
-      retry: false, // Don't retry if rule not found
+      retry: false,
     }
   );
 
-  // Handle error by redirecting
-  if (error) {
-    router.push('/rules');
-    return null;
-  }
+  useEffect(() => {
+    if (!isLoading && !rule) {
+      router.push('/rules');
+    }
+  }, [isLoading, rule, router]);
 
   if (isLoading) {
     return (
@@ -46,22 +47,8 @@ export default function RulePageClient({ ruleId }: RulePageClientProps) {
     );
   }
 
-  // If trying to edit a non-existent rule, show not found message
-  if (!rule && !isLoading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Rule Not Found</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground">
-              The requested rule could not be found.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+  if (!rule) {
+    return null;
   }
 
   return (
